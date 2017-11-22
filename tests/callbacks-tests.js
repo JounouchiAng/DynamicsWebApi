@@ -627,6 +627,34 @@ describe("callbacks -", function () {
             });
         });
 
+        describe("basic - alternate key", function () {
+            var scope;
+            before(function () {
+                var response = mocks.responses.response200;
+                scope = nock(mocks.responses.collectionUrl + "(alternateKey='keyValue')")
+                    .get("")
+                    .reply(response.status, response.responseText, response.responseHeaders)
+            });
+
+            after(function () {
+                nock.cleanAll();
+            });
+
+            it("returns a correct response", function (done) {
+                dynamicsWebApiTest.retrieve("alternateKey='keyValue'", "tests", function (object) {
+                    expect(object).to.deep.equal(mocks.data.testEntity);
+                    done();
+                }, function (object) {
+                    expect(object).to.be.undefined;
+                    done();
+                });
+            });
+
+            it("all requests have been made", function () {
+                expect(scope.isDone()).to.be.true;
+            });
+        });
+
         describe("select", function () {
             var scope;
             before(function () {
@@ -2167,6 +2195,47 @@ describe("callbacks -", function () {
                     id: mocks.data.testEntityId,
                     collection: "tests",
                     expand: [{ property: "prop" }],
+                    impersonate: mocks.data.testEntityId2,
+                    ifmatch: "match"
+                };
+
+                dynamicsWebApiTest.retrieveRequest(dwaRequest, function (object) {
+                    expect(object).to.deep.equal(mocks.data.testEntity);
+                    done();
+                }, function (object) {
+                    expect(object).to.be.undefined;
+                    done();
+                });
+            });
+
+            it("all requests have been made", function () {
+                expect(scope.isDone()).to.be.true;
+            });
+        });
+
+        describe("basic - expand filter", function () {
+            var scope;
+            before(function () {
+                var response = mocks.responses.response200;
+                scope = nock(mocks.responses.testEntityUrl, {
+                    reqheaders: {
+                        'If-Match': 'match',
+                        'MSCRMCallerID': mocks.data.testEntityId2
+                    }
+                })
+                    .get("?$expand=prop($filter=" + encodeURI("field eq ") + '%27value%27)')
+                    .reply(response.status, response.responseText, response.responseHeaders);
+            });
+
+            after(function () {
+                nock.cleanAll();
+            });
+
+            it("returns a correct response", function (done) {
+                var dwaRequest = {
+                    id: mocks.data.testEntityId,
+                    collection: "tests",
+                    expand: [{ property: "prop", filter: "field eq 'value'" }],
                     impersonate: mocks.data.testEntityId2,
                     ifmatch: "match"
                 };

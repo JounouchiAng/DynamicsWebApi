@@ -38,6 +38,7 @@ Any suggestions are welcome!
   * [Execute Web API functions](#execute-web-api-functions)
   * [Execute Web API actions](#execute-web-api-actions)
 * [Formatted Values and Lookup Properties](#formatted-values-and-lookup-properties)
+* [Alternate Key](#alternate-key)
 * [JavaScript Promises](#javascript-promises)
 * [JavaScript Callbacks](#javascript-callbacks)
 
@@ -181,14 +182,16 @@ Property Name | Type | Operation(s) Supported | Description
 async | Boolean | All | **Important! XHR requests only!** Indicates whether the requests should be made synchronously or asynchronously. Default value is `true` (asynchronously).
 collection | String | All | The name of the Entity Collection, for example, for `account` use `accounts`, `opportunity` - `opportunities` and etc.
 count | Boolean | `retrieveMultipleRequest`, `retrieveAllRequest` | Boolean that sets the $count system query option with a value of true to include a count of entities that match the filter criteria up to 5000 (per page). Do not use $top with $count!
+duplicateDetection | Boolean | `createRequest`, `updateRequest`, `upsertRequest` | `v.1.3.4+` **Web API v9+ only!** Boolean that enables duplicate detection. [More info](https://docs.microsoft.com/en-us/dynamics365/customer-engagement/developer/webapi/update-delete-entities-using-web-api#check-for-duplicate-records)
 entity | Object | `updateRequest`, `upsertRequest` | A JavaScript object with properties corresponding to the logical name of entity attributes (exceptions are lookups and single-valued navigation properties).
 expand | Array | `retrieveRequest`, `updateRequest`, `upsertRequest` | An array of Expand Objects (described below the table) representing the $expand OData System Query Option value to control which related records are also returned.
 filter | String | `retrieveRequest`, `retrieveMultipleRequest`, `retrieveAllRequest` | Use the $filter system query option to set criteria for which entities will be returned.
-id | String | `retrieveRequest`, `updateRequest`, `upsertRequest`, `deleteRequest` | A String representing the GUID value for the record.
+id | String | `retrieveRequest`, `updateRequest`, `upsertRequest`, `deleteRequest` | `deprecated in v.1.3.4` Use `key` field, instead of `id`. A String representing the Primary Key (GUID) of the record. 
 ifmatch | String | `retrieveRequest`, `updateRequest`, `upsertRequest`, `deleteRequest` | Sets If-Match header value that enables to use conditional retrieval or optimistic concurrency in applicable requests. [More info](https://msdn.microsoft.com/en-us/library/mt607711.aspx).
 ifnonematch | String | `retrieveRequest`, `upsertRequest` | Sets If-None-Match header value that enables to use conditional retrieval in applicable requests. [More info](https://msdn.microsoft.com/en-us/library/mt607711.aspx).
 impersonate | String | All | A String representing the GUID value for the Dynamics 365 system user id. Impersonates the user.
 includeAnnotations | String | `retrieveRequest`, `retrieveMultipleRequest`, `retrieveAllRequest`, `updateRequest`, `upsertRequest` | Sets Prefer header with value "odata.include-annotations=" and the specified annotation. Annotations provide additional information about lookups, options sets and other complex attribute types.
+key | String | `retrieveRequest`, `updateRequest`, `upsertRequest`, `deleteRequest` | `v.1.3.4+` A String representing collection record's Primary Key (GUID) or Alternate Key(s).
 maxPageSize | Number | `retrieveMultipleRequest`, `retrieveAllRequest` | Sets the odata.maxpagesize preference value to request the number of entities returned in the response.
 navigationProperty | String | `retrieveRequest` | A String representing the name of a single-valued navigation property. Useful when needed to retrieve information about a related record in a single request.
 orderBy | Array | `retrieveMultipleRequest`, `retrieveAllRequest` | An Array (of Strings) representing the order in which items are returned using the $orderby system query option. Use the asc or desc suffix to specify ascending or descending order respectively. The default is ascending if the suffix isn't applied.
@@ -199,7 +202,7 @@ token | String | All | Authorization Token. If set, onTokenRefresh will not be c
 top | Number | `retrieveMultipleRequest`, `retrieveAllRequest` | Limit the number of results returned by using the $top system query option. Do not use $top with $count!
 userQuery | String | `retrieveRequest` | A String representing the GUID value of the user query.
 
-Basic and Advanced functions are also have differences in `expand` parameters. For Basic ones this parameter is a type of String 
+Basic and Advanced functions also have differences in `expand` parameters. For Basic ones this parameter is a type of String 
 while request.expand property is an Array of Expand Objects for Advanced operations. The following table describes Expand Object properties:
 
 Property Name | Type | Description
@@ -900,6 +903,64 @@ OData Annotation | Property Suffix
 `@Microsoft.Dynamics.CRM.lookuplogicalname` | `_LogicalName`
 `@Microsoft.Dynamics.CRM.associatednavigationproperty` | `_NavigationProperty`
 
+## Alternate Key
+Starting from version 1.3.4, you can use alternate keys to Update, Upsert, Retrieve and Delete records. [More Info](https://msdn.microsoft.com/en-us/library/mt607871.aspx#Retrieve%20using%20an%20alternate%20key)
+
+### Basic usage
+
+```js
+var alternateKey = "key='keyValue'"; 
+//or var alternateKey = "key='keyValue',anotherKey='keyValue2'";
+
+//perform a retrieve operaion
+dynamicsWebApi.retrieve(alternateKey, "leads", ["fullname", "subject"]).then(function (record) {
+    //do something with a record here
+})
+.catch(function (error) {
+    //catch an error
+});
+```
+
+### Advanced using Request Object
+
+Please use `key` instead of `id` for all requests that you make using DynamicsWebApi starting from `v.1.3.4`.
+
+Please note, that `id` field is not removed from the library, so all your existing scripts will work without any issue.
+
+```js
+var request = {
+    key: "alternateKey='keyValue'",
+	//key can be used as a primary key (id)
+	//key: '00000000-0000-0000-0000-000000000001',
+    collection: 'leads',
+    select: ['fullname', 'subject']
+};
+
+dynamicsWebApi.retrieveRequest(request).then(function (record) {
+    //do something with a record
+})
+.catch(function (error) {
+    //if the record has not been found the error will be thrown
+});
+```
+
+`key` can be used as a primary key (id):
+
+```js
+var request = {
+	key: '00000000-0000-0000-0000-000000000001',
+    collection: 'leads',
+    select: ['fullname', 'subject']
+};
+
+dynamicsWebApi.retrieveRequest(request).then(function (record) {
+    //do something with a record
+})
+.catch(function (error) {
+    //if the record has not been found the error will be thrown
+});
+```
+
 ### In Progress
 
 - [X] Overloaded functions with rich request options for all Web API operations.
@@ -909,6 +970,8 @@ Feature is very convenient for big Fetch XMLs. `Implemented in v.1.2.8`
 - [X] "Formatted" values in responses. For instance: Web API splits information about lookup fields into separate properties, 
 the config option "formatted" will enable developers to retrieve all information about such fields in a single requests and access it through DynamicsWebApi custom response objects.
 - [X] Simplified names for "Formatted" properties. `Implemented in v.1.3.0`
+- [X] RUD operations using Alternate Keys. `Implemented in v.1.3.4`
+- [X] Duplicate Detection for Web API v.9. `Implemented in v.1.3.4`
 - [ ] Batch requests.
 - [ ] Web API Authentication for On-Premise instances.
 - [ ] Intellisense for request objects.
