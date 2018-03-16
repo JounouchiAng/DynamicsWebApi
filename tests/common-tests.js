@@ -10,7 +10,7 @@ var RequestConverter = require('../lib/utilities/RequestConverter');
 var ErrorHelper = require('../lib/helpers/ErrorHelper');
 var mocks = require("./stubs");
 var dateReviver = require('../lib/requests/helpers/dateReviver');
-var sendRequest = require('../lib/requests/sendRequest');
+var Request = require('../lib/requests/sendRequest');
 var parseResponse = require('../lib/requests/helpers/parseResponse');
 
 describe("Utility.buildFunctionParameters - ", function () {
@@ -105,6 +105,24 @@ describe("RequestConverter.convertRequestOptions -", function () {
         expect(result).to.deep.equal({ url: stubUrl, query: "", headers: {} });
     });
 
+    it("mergeLabels=true", function () {
+        var dwaRequest = {
+            mergeLabels: true
+        };
+
+        var result = RequestConverter.convertRequestOptions(dwaRequest, "", stubUrl);
+        expect(result).to.deep.equal({ url: stubUrl, query: "", headers: { 'MSCRM.MergeLabels': 'true' } });
+    });
+
+    it("mergeLabels=false", function () {
+        var dwaRequest = {
+            mergeLabels: false
+        };
+
+        var result = RequestConverter.convertRequestOptions(dwaRequest, "", stubUrl);
+        expect(result).to.deep.equal({ url: stubUrl, query: "", headers: {} });
+    });
+
     it("expand is empty", function () {
         var dwaRequest = {
             expand: undefined
@@ -191,7 +209,7 @@ describe("RequestConverter.convertRequestOptions -", function () {
         };
 
         var result = RequestConverter.convertRequestOptions(dwaRequest, "", stubUrl);
-        expect(result).to.deep.equal({ url: stubUrl, query: "$expand=property($filter=" + ("name eq 'name'") + ")", headers: {} });
+        expect(result).to.deep.equal({ url: stubUrl, query: "$expand=property($filter=" + (encodeURIComponent("name eq 'name'")) + ")", headers: {} });
     });
 
     it("expand - property,orderBy empty", function () {
@@ -373,7 +391,25 @@ describe("RequestConverter.convertRequestOptions -", function () {
         };
 
         var result = RequestConverter.convertRequestOptions(dwaRequest, "", stubUrl);
-        expect(result).to.deep.equal({ url: stubUrl, query: "$filter=name eq 'name'", headers: {} });
+        expect(result).to.deep.equal({ url: stubUrl, query: "$filter=" + encodeURIComponent("name eq 'name'"), headers: {} });
+    });
+
+    it("filter - special symbols encoded", function () {
+        var dwaRequest = {
+            filter: "email eq 'test+email@example.com'"
+        };
+
+        var result = RequestConverter.convertRequestOptions(dwaRequest, "", stubUrl);
+        expect(result).to.deep.equal({ url: stubUrl, query: "$filter=" + encodeURIComponent("email eq 'test+email@example.com'"), headers: {} });
+    });
+
+    it("filter - remove brackets from guid", function () {
+        var dwaRequest = {
+            filter: "name eq 'name' and testid1 eq {0000a000-0000-0000-0000-000000000001} and testid2 eq 0000a000-0000-0000-0000-000000000002 and teststring eq '{0000a000-0000-0000-0000-000000000003}'"
+        };
+
+        var result = RequestConverter.convertRequestOptions(dwaRequest, "", stubUrl);
+        expect(result).to.deep.equal({ url: stubUrl, query: "$filter=" + encodeURIComponent("name eq 'name' and testid1 eq 0000a000-0000-0000-0000-000000000001 and testid2 eq 0000a000-0000-0000-0000-000000000002 and teststring eq '{0000a000-0000-0000-0000-000000000003}'"), headers: {} });
     });
 
     it("ifmatch empty", function () {
@@ -794,9 +830,9 @@ describe("RequestConverter.convertRequestOptions -", function () {
             select: ["name"],
             orderBy: ["order"]
         }, {
-                property: "property2",
-                select: ["name3"]
-            }];
+            property: "property2",
+            select: ["name3"]
+        }];
 
         result = RequestConverter.convertRequestOptions(dwaRequest, "", stubUrl);
         expect(result).to.deep.equal({ url: stubUrl, query: "$select=name,subject&$top=5&$orderby=order&$expand=property($select=name;$orderby=order),property2($select=name3)", headers: {} });
@@ -1064,7 +1100,7 @@ describe("RequestConverter.convertRequest -", function () {
         };
 
         var result = RequestConverter.convertRequest(dwaRequest);
-        expect(result).to.deep.equal({ url: "cols", headers: {}, async: true });
+        expect(result).to.deep.equal({ url: "Cols", headers: {}, async: true });
     });
 
     it("collection - to lower case exception", function () {
@@ -1407,7 +1443,216 @@ describe("DWA.Types", function () {
     });
 });
 
-describe("sendRequest", function () {
+describe('Request.makeRequest', function () {
+    describe('useEntityNames', function () {
+        var scope;
+        before(function () {
+            var response = mocks.responses.response200;
+            var response2 = mocks.responses.responseEntityDefinitions;
+            scope = nock(mocks.webApiUrl)
+                .get('/EntityDefinitions?$select=LogicalCollectionName,LogicalName')
+                .once()
+                .reply(response2.status, response2.responseText, response2.responseHeaders)
+                .get('/tests(' + mocks.data.testEntityId + ')')
+                .reply(response.status, response.responseText, response.responseHeaders);
+        });
+
+        after(function () {
+            nock.cleanAll();
+            Request._clearEntityNames();
+        });
+
+        it("returns a correct response", function (done) {
+            //{ webApiUrl: mocks.webApiUrl }
+            var request = {
+                collection: 'test',
+                key: mocks.data.testEntityId
+            };
+            var config = {
+                webApiUrl: mocks.webApiUrl,
+                useEntityNames: true
+            };
+            Request.makeRequest('GET', request, 'any', config, function (object) {
+                var expectedO = {
+                    status: 200,
+                    headers: {},
+                    data: mocks.data.testEntity
+                };
+                expect(object).to.deep.equal(expectedO);
+                done();
+            }, function (object) {
+                expect(object).to.be.undefined;
+                done();
+            });
+        });
+
+        it("all requests have been made", function () {
+            expect(scope.isDone()).to.be.true;
+        });
+    });
+
+    describe('useEntityNames - entity metadata requested only once', function () {
+        var scope;
+        before(function () {
+            var response = mocks.responses.response200;
+            var response2 = mocks.responses.responseEntityDefinitions;
+            scope = nock(mocks.webApiUrl)
+                .get('/EntityDefinitions?$select=LogicalCollectionName,LogicalName')
+                .once()
+                .reply(response2.status, response2.responseText, response2.responseHeaders)
+                .get('/tests(' + mocks.data.testEntityId + ')')
+                .twice()
+                .reply(response.status, response.responseText, response.responseHeaders);
+        });
+
+        after(function () {
+            nock.cleanAll();
+            Request._clearEntityNames();
+        });
+
+        it("returns a correct response", function (done) {
+            var request = {
+                collection: 'test',
+                key: mocks.data.testEntityId
+            };
+            var config = {
+                webApiUrl: mocks.webApiUrl,
+                useEntityNames: true
+            };
+
+            var error = function (object) {
+                expect(object).to.be.undefined;
+                done();
+            };
+
+            Request.makeRequest('GET', request, 'any', config, function (object) {
+                var expectedO = {
+                    status: 200,
+                    headers: {},
+                    data: mocks.data.testEntity
+                };
+                expect(object).to.deep.equal(expectedO);
+
+                var request2 = {
+                    collection: 'test',
+                    key: mocks.data.testEntityId
+                };
+
+                Request.makeRequest('GET', request2, 'any', config, function (object1) {
+                    var expectedO1 = {
+                        status: 200,
+                        headers: {},
+                        data: mocks.data.testEntity
+                    };
+                    expect(object1).to.deep.equal(expectedO1);
+                    done();
+                }, error);
+            }, error);
+        });
+
+        it("all requests have been made", function () {
+            expect(scope.isDone()).to.be.true;
+        });
+    });
+
+    describe('useEntityNames - request with collection name does not fail', function () {
+        var scope;
+        before(function () {
+            var response = mocks.responses.response200;
+            var response2 = mocks.responses.responseEntityDefinitions;
+            scope = nock(mocks.webApiUrl)
+                .get('/EntityDefinitions?$select=LogicalCollectionName,LogicalName')
+                .once()
+                .reply(response2.status, response2.responseText, response2.responseHeaders)
+                .get('/tests(' + mocks.data.testEntityId + ')')
+                .reply(response.status, response.responseText, response.responseHeaders);
+        });
+
+        after(function () {
+            nock.cleanAll();
+            Request._clearEntityNames();
+        });
+
+        it("returns a correct response", function (done) {
+            var request = {
+                collection: 'tests',
+                key: mocks.data.testEntityId
+            };
+            var config = {
+                webApiUrl: mocks.webApiUrl,
+                useEntityNames: true
+            };
+            Request.makeRequest('GET', request, 'any', config, function (object) {
+                var expectedO = {
+                    status: 200,
+                    headers: {},
+                    data: mocks.data.testEntity
+                };
+                expect(object).to.deep.equal(expectedO);
+                done();
+            }, function (object) {
+                expect(object).to.be.undefined;
+                done();
+            });
+        });
+
+        it("all requests have been made", function () {
+            expect(scope.isDone()).to.be.true;
+        });
+    });
+
+    describe('useEntityNames - Xrm.Internal', function () {
+        var scope;
+        before(function () {
+            var response = mocks.responses.response200;
+            var response2 = mocks.responses.responseEntityDefinitions;
+            scope = nock(mocks.webApiUrl)
+                .get('/tests(' + mocks.data.testEntityId + ')')
+                .reply(response.status, response.responseText, response.responseHeaders);
+        });
+
+        after(function () {
+            nock.cleanAll();
+            Request._clearEntityNames();
+            global.Xrm.Internal = null;
+        });
+
+        it("returns a correct response", function (done) {
+            global.Xrm.Internal = {
+                getEntitySetName: function (entityName) {
+                    return entityName + 's';
+                }
+            };
+
+            var request = {
+                collection: 'test',
+                key: mocks.data.testEntityId
+            };
+            var config = {
+                webApiUrl: mocks.webApiUrl,
+                useEntityNames: true
+            };
+            Request.makeRequest('GET', request, 'any', config, function (object) {
+                var expectedO = {
+                    status: 200,
+                    headers: {},
+                    data: mocks.data.testEntity
+                };
+                expect(object).to.deep.equal(expectedO);
+                done();
+            }, function (object) {
+                expect(object).to.be.undefined;
+                done();
+            });
+        });
+
+        it("all requests have been made", function () {
+            expect(scope.isDone()).to.be.true;
+        });
+    });
+});
+
+describe("Request.sendRequest", function () {
     describe("when url is long, request is converted to batch", function () {
         var scope;
         var url = 'test';
@@ -1443,13 +1688,47 @@ describe("sendRequest", function () {
         });
 
         it("returns a correct response", function (done) {
-            sendRequest('GET', url, { webApiUrl: mocks.webApiUrl }, null, null, function (object) {
+            Request.sendRequest('GET', url, { webApiUrl: mocks.webApiUrl }, null, null, function (object) {
                 var multiple = mocks.responses.multiple();
                 //delete multiple.oDataContext;
                 var expectedO = {
                     status: 200,
                     headers: {},
                     data: multiple
+                };
+                expect(object).to.deep.equal(expectedO);
+                done();
+            }, function (object) {
+                expect(object).to.be.undefined;
+                done();
+            });
+        });
+
+        it("all requests have been made", function () {
+            expect(scope.isDone()).to.be.true;
+        });
+    });
+
+    describe("removes additional properties set by DynamicsWebApi", function () {
+        var scope;
+        var url = 'test';
+        before(function () {
+            var response = mocks.responses.basicEmptyResponseSuccess;
+            scope = nock(mocks.webApiUrl + 'test')
+                .patch("", mocks.data.testEntity)
+                .reply(response.status, response.responseText, response.responseHeaders);
+        });
+
+        after(function () {
+            nock.cleanAll();
+        });
+
+        it("returns a correct response", function (done) {
+            Request.sendRequest('PATCH', url, { webApiUrl: mocks.webApiUrl }, mocks.data.testEntityAdditionalAttributes, null, function (object) {
+                var expectedO = {
+                    status: mocks.responses.basicEmptyResponseSuccess.status,
+                    headers: {},
+                    data: null
                 };
                 expect(object).to.deep.equal(expectedO);
                 done();
@@ -1474,5 +1753,16 @@ describe("parseResponse", function () {
     it("parses formatted values - array", function () {
         var response = parseResponse(mocks.responses.multipleFormattedResponse.responseText);
         expect(response).to.be.deep.equal(mocks.responses.multipleFormatted());
+    });
+
+    it("parses formatted and aliased values", function () {
+        var response = parseResponse(mocks.responses.responseFormattedAliased200.responseText);
+        expect(response).to.be.deep.equal(mocks.responses.responseFormattedAliasedEntity());
+    });
+
+    it("when alias are not unique throws error", function () {
+        expect(function () {
+            parseResponse(mocks.responses.responseFormattedAliasedNotUnique200.responseText);
+        }).to.throw("The alias name of the linked entity must be unique!");
     });
 });
